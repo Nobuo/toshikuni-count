@@ -77,12 +77,23 @@ class QueueParser(HTMLParser):
             return
 
 
+class QueueClosed(Exception):
+    """受付終了を示す例外"""
+    pass
+
+
 def fetch_queue_number(url: str):
-    """(数字, 表示ラベル) のタプルを返す。取得失敗時は None を返す。"""
+    """(数字, 表示ラベル) のタプルを返す。取得失敗時は None を返す。受付終了時は QueueClosed を送出。"""
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             html = resp.read().decode("utf-8", errors="replace")
+
+        # 受付終了チェック
+        if "リスト上に見つからないため" in html:
+            raise QueueClosed("リスト上に見つからないため、マイページを表示することができません。")
+        if "予約を受け付けておりません" in html:
+            raise QueueClosed("現在、予約を受け付けておりません。")
 
         # まず赤文字パーサーで試みる
         parser = QueueParser()
@@ -108,6 +119,8 @@ def fetch_queue_number(url: str):
                 n = int(m.group(1))
                 return (n, f"{n}番目")
 
+    except QueueClosed:
+        raise
     except Exception as e:
         print(f"[ERROR] 取得失敗: {e}")
 
@@ -160,8 +173,13 @@ def main():
     last_number = None
 
     while True:
-        result = fetch_queue_number(args.url)
         now = time.strftime("%H:%M:%S")
+        try:
+            result = fetch_queue_number(args.url)
+        except QueueClosed as e:
+            print(f"[{now}] 受付終了: {e}")
+            notify("としくに耳鼻咽喉科", "受付が終了しました。プログラムを終了します。", bark_url)
+            return
 
         if result is None:
             print(f"[{now}] 情報を取得できませんでした")
